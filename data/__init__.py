@@ -1,1 +1,1 @@
-from .data import FewshotData
+from .dataset import FewshotData

@@ -34,15 +34,6 @@ class MVGG16(nn.Module):
     def forward(self, x):
         output = self.conv_layers(x)
         return output
-    
-    def activations_hook(self, grad):
-        self.gradients = grad
-
-    def get_activations_gradient(self):
-        return self.gradients
-    
-    def get_activations(self, x):
-        return self.conv_layers(x)
 
     def _initialize_weights(self):
         for m in self.modules():
