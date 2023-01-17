@@ -1,11 +1,15 @@
 import torch
+import torch.nn as nn
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
+from torchvision.transforms import Resize
 import os
 from PIL import Image
 import random
 import numpy as np
 from collections import defaultdict
+from functools import reduce
+from torchvision import transforms
 
 class FewshotData(Dataset):
     '''
@@ -16,24 +20,34 @@ class FewshotData(Dataset):
     fewshot style Dataset class
     support-query pairs x num_episodes
     '''
-    def __init__(self, data_path, mode, n_ways, n_shots, n_query, num_episode, transforms=None) :
+    def __init__(self, data_path, mode, n_ways, n_shots, n_query, resize=(512, 512), transforms=None) :
         super().__init__()
         self.data_path = data_path
-        self.img_path = os.path.join(data_path, 'imgs')
-        self.mask_path = os.path.join(data_path, 'masks')
+        self.img_path = os.path.join(data_path, mode, 'imgs') 
+        self.mask_path = os.path.join(data_path, mode, 'masks')
         
         self.mode = mode
         self.n_ways = n_ways
         self.n_shots = n_shots
         self.n_query = n_query
-        self.num_episode = num_episode    
+        # self.num_episode = num_episode
         self.classes = list(range(1, n_ways+1))
         self.cls_to_img = self._map_cls_to_img() # dict, key:cls number, value: a list of filename which include key class
+        self.all_imgs = list(reduce(lambda x, y: x+y, list(self.cls_to_img.values())))
+        self.transforms = transforms
         
+        self.bilinear = Resize(size=resize, interpolation=Image.BILINEAR)
+        self.nearest = Resize(size=resize, interpolation=Image.NEAREST)
+        
+    def __len__(self):
+        ids = list(self.cls_to_img.keys())
+        num_imgs = [len(self.cls_to_img[id]) for id in ids]
+        return min(num_imgs)//self.n_shots
     
     def __getitem__(self, index):
         # support sets
-        # 다 뽑고 여기에 안들어가는 이미지들 중에서 query 뽑아야해요            
+        # 다 뽑고 여기에 안들어가는 이미지들 중에서 query 뽑아야해요
+        
         episode = {'support_imgs':[],
                    'support_fg_masks':[],
                    'support_bg_masks':[],
@@ -42,101 +56,65 @@ class FewshotData(Dataset):
         support_sets = []
         for cls in self.classes:
             # support_files = random.sample(self.cls_to_img[cls], self.n_shots) # cls에 해당하는 파일들중 shot개수만큼 랜덤으로 뽑음
-            support_files = [self.cls_to_img[cls].pop() for _ in range(self.n_shots)] # 다음 에피소드에서 겹치면 안되니까 pop으로 아예 제거
-            support_set += support_files
-            sup_imgs = [TF.to_tensor(Image.open(os.path.join(self.img_path, file)).convert('RGB')) for file in support_files]
-            #TODO: fg bg 구별 함수
-            sup_masks = [self._to_bg_fg_mask(Image.open(os.path.join(self.mask_path, file) for file in support_files))]
+            support_files = [self.cls_to_img[cls].pop() for _ in range(self.n_shots)] 
+            support_sets += support_files
+            if self.transforms == None:
+                sup_imgs = [TF.to_tensor(self.bilinear(Image.open(os.path.join(self.img_path, file+'.jpg')).convert('RGB'))) for file in support_files]
+                # [[bg mask, fg mask], [bg maks, fg mask], ...]
+                sup_masks = [self._to_bg_fg_mask(torch.from_numpy(np.array(self.nearest(Image.open(os.path.join(self.mask_path, file+'.png'))))), cls, self.classes) for file in support_files]
+            else: 
+                sup_imgs = [TF.to_tensor(self.bilinear(self.transforms(Image.open(os.path.join(self.img_path, file+'.jpg')).convert('RGB')))) for file in support_files]
+                # [[bg mask, fg mask], [bg maks, fg mask], ...]
+                sup_masks = [self._to_bg_fg_mask(torch.from_numpy(np.array(self.nearest(self.transforms(Image.open(os.path.join(self.mask_path, file+'.png')))))), cls, self.classes) for file in support_files]
             #TODO: small object 제외
             episode['support_imgs'].append(sup_imgs)
             episode['support_bg_masks'].append([i[0]for i in sup_masks])
             episode['support_fg_masks'].append([i[1]for i in sup_masks])
-        # support 가 바뀌므로 query는 중복의 가능성이 있어도 될 것 같아사 그냥 support만 제외한 목록에서 랜덤 선택
-        query_files =  random.sample(list(set(os.listdir(self.img_path)) - set(support_sets)), self.num_query) 
-        qry_imgs = [TF.to_tensor(Image.open(os.path.join(self.img_path, file)).convert('RGB')) for file in query_files]
-        #TODO: label화 함수
-        qry_labels = [self._to_labelmap(Image.open(os.path.join(self.mask_path, file) for file in query_files))]
-        episode['query_imgs'].append(qry_imgs)
-        episode['query_labels'].append(qry_labels)
+        # support 가 바뀌므로 query는 중복의 가능성이 있어도 될 것 같아사 그냥 supp# jpg ort만 제외한 목록에서 랜덤 선택
+        query_files =  random.sample(list(set(self.all_imgs) - set(support_sets)), self.n_query)
+        if self.transforms == None:
+            qry_imgs = [TF.to_tensor(self.bilinear(Image.open(os.path.join(self.img_path, file+'.jpg')).convert('RGB'))) for file in query_files]
+            qry_labels = [torch.from_numpy(np.array(self.nearest(Image.open(os.path.join(self.mask_path, file+'.png'))))) for file in query_files]
+        else:
+            qry_imgs = [TF.to_tensor(self.bilinear(self.transforms(Image.open(os.path.join(self.img_path, file+'.jpg')).convert('RGB')))) for file in query_files]
+            qry_labels = [torch.from_numpy(np.array(self.nearest(self.transforms(Image.open(os.path.join(self.mask_path, file+'.png')))))) for file in query_files]
+
+        episode['query_imgs'].extend(qry_imgs)
+        episode['query_labels'].extend(qry_labels)
         return episode
-        
-    #TODO
-    def _to_labelmap(self):
-        pass
     
-    #TODO
-    def _to_bg_fg_mask(self, cls):
-        pass
+    def _to_bg_fg_mask(self, mask, cls, all_cls):
+        """Comvert from VOC style segmentation mask to [back ground mask(binary), fore ground mask(binary)] list
+
+        Args:
+            mask (torch.Tensor): label map, 255 will be ignored 
+        """
+        # 해당 클래스와 같은 부분을 1로 하여 fg mask로 만들고
+        # bg mask의 경우 에피소드 내의 모든 클래스에 해당하는 부분은 0으로 처리한다(배경아 아닌 것으로 처리)
+        bg_mask = torch.where(mask!=cls, torch.ones_like(mask), torch.zeros_like(mask))
+        fg_mask = torch.where(mask==cls, torch.ones_like(mask), torch.zeros_like(mask))
+        for i in all_cls:
+            bg_mask[mask==i] = 0
+        return [bg_mask, fg_mask]
          
-    #TODO
-    def _cls_in_mask(mask):
-        pass
     def _map_cls_to_img(self):
         cls_to_img = defaultdict(list)
         filenames = os.listdir(self.img_path)
         for file in filenames:
-            mask = Image.open(os.path.join(self.mask_path, file))
-            #TODO: extract classes from mask
-            cls_list = _cls_in_mask(mask)
+            name = os.path.splitext(file)[0]
+            mask = Image.open(os.path.join(self.mask_path, name+'.png'))
+            cls_list = set(np.unique(mask)) - {0}
             for cls in cls_list:
-                cls_to_img[cls].append(file)
+                cls_to_img[cls].append(name)
         return cls_to_img
-        
-        
-        
-        
-    def __len__(self):
-        return self.num_episode
-    def __getitem__(self, index):
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        # self.mode = mode
-        
-        # self.img_path = os.path.join(data_path, mode, 'imgs')
-        # self.mask_path = os.path.join(data_path, mode, 'mask')
-        
-        # self.imgs = os.listdir(self.img_path)
-        
-        # self.ways = range(1, n_ways+1)
-        # self.n_ways = n_ways
-        # self.n_shots = n_shots
-        # self.max_iters = max_iters
-        
-        # self.transforms = transforms
     
-    
-    
-    
-    # def __len__(self):
-    #     len(self.imgs)
-    # def __getitem__(self, idx):
-    #     filename = self.imgs[idx]
-    #     # query
-    #     qry_img = Image.open(os.path.join(self.qry_img_path, filename)).convert('RGB')
-    #     #TODO: grayscale여부
-    #     qry_mask = Image.open(os.path.join(self.mask_path, filename))
-    #     if self.transforms != None:
-    #         qry_img = self.transforms(qry_img)
-    #     qry_img = TF.to_tensor(qry_img)
-    #     #TODO: target class, mask 내의 클래스 중에 random하게 추출
-    #     cls = random.choice(sorted(set(np.unique(qry_mask)) & self.ways))
-        
-        # support set
-        # cls에 속하는 것들 중에 랜덤하게 shot개수만큼 뽑으면 되겠죵
-        
-        
-        
-        
-        
+            
+
+if __name__ == '__main__':
+    from torch.utils.data import DataLoader
+    from torchvision.transforms import Compose, Resize
+    # transforms = Compose([Resize(size=(512, 512))])
+    dataset = FewshotData(data_path='/content/data/voc2012', mode='train', n_ways=20, n_shots=5, n_query=3, resize=(512, 512), transforms=None)
+    dataloader= DataLoader(dataset, 2)
+    for batch in dataloader:
+        a = 1
