@@ -1,6 +1,6 @@
 # few-shot segmentation Pytorch  
 Pytorch implementation of few-shot segmentation methods  
-The way to load data is suitable for PASCAL-VOC style datasets (255 is the ignored index)  
+The way to load data is suitable for PASCAL-VOC-style datasets (255 is the ignored index)  
 ## model list  
 - PANet | [paper](https://openaccess.thecvf.com/content_ICCV_2019/papers/Wang_PANet_Few-Shot_Image_Semantic_Segmentation_With_Prototype_Alignment_ICCV_2019_paper.pdf)  
 ---  
