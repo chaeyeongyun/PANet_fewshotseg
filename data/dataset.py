@@ -12,14 +12,9 @@ from functools import reduce
 from torchvision import transforms
 
 class FewshotData(Dataset):
-    '''
-    나는 일단
-    1. n_way n_shots 1 3 H W 그니까 모든클래스를 shot개만큼 개지고 있는 support set이랑
-    2. n_query 3 H W 의 query set을 만들어보고자 한다. 
-    batch size를 1이상으로 한다면 아마.. 각각 1 n_way n_shots 1 3 H W, 1 n_query 3 H W 이 되겠지만 그러면 오히려 좋게 하나의 에피소드로 취급하면된다. 맞제
-    fewshot style Dataset class
-    support-query pairs x num_episodes
-    '''
+    """
+    few-shot style dataset class for PASCALVOC2012-style dataset
+    """
     def __init__(self, data_path, mode, n_ways, n_shots, n_query, resize=(512, 512), transforms=None) :
         super().__init__()
         self.data_path = data_path
@@ -30,8 +25,8 @@ class FewshotData(Dataset):
         self.n_ways = n_ways
         self.n_shots = n_shots
         self.n_query = n_query
-        # self.num_episode = num_episode
-        self.classes = list(range(1, n_ways+1))
+        
+        self.classes = list(range(1, n_ways+1)) # background 0, [1, n_way] foreground class
         self.cls_to_img = self._map_cls_to_img() # dict, key:cls number, value: a list of filename which include key class
         self.all_imgs = list(reduce(lambda x, y: x+y, list(self.cls_to_img.values())))
         self.transforms = transforms
@@ -45,9 +40,6 @@ class FewshotData(Dataset):
         return min(num_imgs)//self.n_shots
     
     def __getitem__(self, index):
-        # support sets
-        # 다 뽑고 여기에 안들어가는 이미지들 중에서 query 뽑아야해요
-        
         episode = {'support_imgs':[],
                    'support_fg_masks':[],
                    'support_bg_masks':[],
@@ -55,7 +47,6 @@ class FewshotData(Dataset):
                    'query_labels':[]}
         support_sets = []
         for cls in self.classes:
-            # support_files = random.sample(self.cls_to_img[cls], self.n_shots) # cls에 해당하는 파일들중 shot개수만큼 랜덤으로 뽑음
             support_files = [self.cls_to_img[cls].pop() for _ in range(self.n_shots)] 
             support_sets += support_files
             if self.transforms == None:
@@ -78,7 +69,7 @@ class FewshotData(Dataset):
         else:
             qry_imgs = [TF.to_tensor(self.bilinear(self.transforms(Image.open(os.path.join(self.img_path, file+'.jpg')).convert('RGB')))) for file in query_files]
             qry_labels = [torch.from_numpy(np.array(self.nearest(self.transforms(Image.open(os.path.join(self.mask_path, file+'.png')))))) for file in query_files]
-
+        qry_labels = self._filter_qry_label(qry_labels)
         episode['query_imgs'].extend(qry_imgs)
         episode['query_labels'].extend(qry_labels)
         return episode
@@ -107,14 +98,9 @@ class FewshotData(Dataset):
             for cls in cls_list:
                 cls_to_img[cls].append(name)
         return cls_to_img
-    
+    def _filter_qry_label(self, qry_labels):
+        '''qry label is a list of query images'''        
+        for i in range(len(qry_labels)):
+            qry_labels[i] = torch.where(qry_labels[i]<=self.n_ways, qry_labels[i], 255)
+        return qry_labels
             
-
-if __name__ == '__main__':
-    from torch.utils.data import DataLoader
-    from torchvision.transforms import Compose, Resize
-    # transforms = Compose([Resize(size=(512, 512))])
-    dataset = FewshotData(data_path='/content/data/voc2012', mode='train', n_ways=20, n_shots=5, n_query=3, resize=(512, 512), transforms=None)
-    dataloader= DataLoader(dataset, 2)
-    for batch in dataloader:
-        a = 1
