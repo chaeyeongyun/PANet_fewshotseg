@@ -15,35 +15,35 @@ from metric import Measurement
 from config import make_config
 
 class PANet():
-    def __init__(self, opt):
-        self.device_setting(opt.device)
-        if opt.mode == 'train':
+    def __init__(self, config):
+        self.device_setting(config.device)
+        if config.mode == 'train':
             self.feature_extractor = models.MVGG16(init_weights=True).to(self.device)
-            self.half = opt.half
-            self.batchsize = opt.batchsize
-            self.num_workers = opt.num_workers
-            self.scaler = opt.scaler
-            self.align_loss_scaler = opt.align_loss_scaler
-            self.dataset = FewshotData(data_path=opt.data_path, mode=opt.mode, 
-                                       n_ways=opt.n_ways, n_shots=opt.n_shots,n_query=opt.n_query,
+            self.half = config.half
+            self.batchsize = config.batchsize
+            self.num_workers = config.num_workers
+            self.scaler = config.scaler
+            self.align_loss_scaler = config.align_loss_scaler
+            self.dataset = FewshotData(data_path=config.data_path, mode=config.mode, 
+                                       n_ways=config.n_ways, n_shots=config.n_shots,n_query=config.n_query,
                                        resize=(512, 512), transforms=None)
-            self.optimizer = torch.optim.Adam(self.feature_extractor.parameters(), lr=opt.init_lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0001, amsgrad=False)
+            self.optimizer = torch.optim.Adam(self.feature_extractor.parameters(), lr=config.init_lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0.0001, amsgrad=False)
             self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, len(self.dataset), eta_min=1e-7, verbose=False)
             self.ce_loss = nn.CrossEntropyLoss(ignore_index=255)
-            self.ckpoint_path = os.path.join(opt.save_path, 'ckpoints'+str(len(os.listdir(opt.save_path))))
+            self.ckpoint_path = os.path.join(config.save_path, 'ckpoints'+str(len(os.listdir(config.save_path))))
             os.makedirs(self.ckpoint_path)
         
-        if opt.mode == 'test':
+        if config.mode == 'test':
             self.feature_extractor = models.MVGG16(init_weights=False)
-            self.feature_extractor.load_state_dict(torch.load(opt.weights))
+            self.feature_extractor.load_state_dict(torch.load(config.weights))
             self.feature_extractor = self.feature_extractor.to(self.device)
-            self.n_ways = opt.n_ways
-            self.batchsize = opt.batchsize
-            self.scaler = opt.scaler
-            self.dataset = FewshotData(data_path=opt.data_path, mode=opt.mode, 
-                                       n_ways=opt.n_ways, n_shots=opt.n_shots,n_query=opt.n_query,
+            self.n_ways = config.n_ways
+            self.batchsize = config.batchsize
+            self.scaler = config.scaler
+            self.dataset = FewshotData(data_path=config.data_path, mode=config.mode, 
+                                       n_ways=config.n_ways, n_shots=config.n_shots,n_query=config.n_query,
                                        resize=(512, 512), transforms=None)
-            self.result_path = os.path.join(opt.save_path, 'test_results'+str(len(os.listdir(opt.save_path))))
+            self.result_path = os.path.join(config.save_path, 'test_results'+str(len(os.listdir(config.save_path))))
             os.makedirs(self.result_path)
         
     def train(self,):
@@ -300,14 +300,14 @@ class PANet():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', type=str, default='train', help='mode')
-    mode = parser.parse_args()
-    mode = mode.mode
+    opt = parser.parse_args()
+    mode = opt.mode
     
     if mode == 'train':
-        opt = make_config(mode)
-        panet = PANet(opt)
+        config = make_config(mode)
+        panet = PANet(config)
         panet.train()
     if mode in ['test']:
-        opt = make_config(mode)
-        panet = PANet(opt)
+        config = make_config(mode)
+        panet = PANet(config)
         panet.test()

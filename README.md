@@ -7,10 +7,10 @@ Pytorch implementation of few-shot segmentation methods
 You can modify options for train/test in config.py  
 ### Train
 ```python
-python panet.py --mode train
+python PANet.py --mode train
 ```
 
 ### Test
 ```python
-python panet.py --mode test
+python PANet.py --mode test
 ```
